@@ -6,11 +6,14 @@
   "dependencies": {
     "async": "^0.9.0",
     "browserify": "^7.0.2",
+    "debug": "^2.1.1",
     "express": "^4.10.6",
     "extend": "^2.0.0",
-    "nools": "~0.3.0"
+    "nools": "^0.3.0"
   },
-  "devDependencies": {},
+  "devDependencies": {
+    "limiter": "^1.0.5"
+  },
   "scripts": {
     "test": "mocha"
   },

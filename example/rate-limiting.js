@@ -1,7 +1,7 @@
 "use strict";
 var express = require('express');
 var nools = require('nools');
-
+var RateLimiter = require('./token-bucket');
 var app = express();
 
 // First define object types for facts. There will be LoopBack models.
@@ -10,6 +10,7 @@ var app = express();
 var Context = function(req, res) {
   this.req = req;
   this.res = res;
+  this.proceed = true;
 };
 
 // Mock up the Application model
@@ -25,50 +26,28 @@ var User = function(id, username, email) {
   this.email = email;
 };
 
-// Mock up the Status model
-var Status = function(count, limit) {
-  this.count = count;
-  this.limit = limit;
-};
-
 // A global counters
-var counters = {};
+var rateLimiter = new RateLimiter({interval: 1000, limit: 10});
 
 // Define rules
 var flow = nools.flow("Rate Limiting", function(f) {
-  this.rule("Limit reqs for application and user",
-    [
-      [Application, 'a'],
-      [User, 'u']
-    ], function(facts) {
-      console.log('Limit: ', facts);
-      var key = facts.a.id + '-' + facts.u.id;
-      var s = this.getFacts(Status)[0];
-      s.count = counters[key];
-      this.modify(s);
-      if (counters[key] > 10) {
-        console.log('Exceeding limit');
-      }
-    });
-
-  this.rule("Count reqs for application and user",
+  this.rule("Limit requests based on application and user",
     [
       [Application, 'a'],
       [User, 'u', "u.username == 'john'"]
     ], function(facts) {
-      console.log('Count: ', facts);
-      if (counters[facts.a.id + '-' + facts.u.id] === undefined) {
-        counters[facts.a.id + '-' + facts.u.id] = 1;
-      } else {
-        counters[facts.a.id + '-' + facts.u.id]++;
-      }
+      console.log('Action fired - Limit: ', facts);
+      var key = facts.a.id + '-' + facts.u.id;
+      var ctx = this.getFacts(Context)[0];
+      ctx.proceed = rateLimiter.enforce(ctx, key);
+      this.modify(ctx);
     });
 
 });
 
-function testFlow(ctx) {
+function testFlow(ctx, next) {
   // Create a session with initial facts
-  var session = flow.getSession(new Status(0, 10));
+  var session = flow.getSession(ctx);
 
   // Add more facts
   session.assert(new Application(ctx.application.id,
@@ -78,14 +57,19 @@ function testFlow(ctx) {
 
   // Match
   session.match().then(function() {
-    var facts = session.getFacts();
-    console.log('Facts:', facts);
-    console.log('Counters:', counters);
-    ctx.res.send({facts: facts, counters: counters});
+    console.log('Match is done');
+    var ctx = session.getFacts(Context)[0];
+    if (ctx.limit) {
+      console.log(ctx.limit);
+    }
+    if (ctx.proceed) {
+      next();
+    }
     session.dispose();
   }, function(err) {
     if (err) {
-      return console.error(err);
+      console.error(err);
+      next(err);
     }
   });
   return session;
@@ -108,7 +92,13 @@ app.use(function contextInit(req, res, next) {
 
 // Intercept the requests and enforce rules
 app.use(function(req, res, next) {
-  testFlow(req.ctx);
+  testFlow(req.ctx, next);
+});
+
+app.use(function(req, res, next) {
+  console.log('API invoked: ', req.url);
+  res.send(req.ctx.limit ||
+  {msg: 'API invoked without rate limiting: ' + req.url});
 });
 
 app.listen(3000, function() {
