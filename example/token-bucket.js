@@ -43,7 +43,7 @@ RateLimiter.prototype.enforce = function(ctx, key) {
     res.setHeader('X-RateLimit-Remaining', remaining);
     res.setHeader('X-RateLimit-Reset', reset);
 
-    ctx.limit = {
+    ctx.limits[key] = {
       limit: this.limit,
       remaining: remaining,
       reset: reset

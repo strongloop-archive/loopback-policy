@@ -10,6 +10,7 @@ var app = express();
 var Context = function(req, res) {
   this.req = req;
   this.res = res;
+  this.limits = {};
   this.proceed = true;
 };
 
@@ -36,13 +37,23 @@ var flow = nools.flow("Rate Limiting", function(f) {
       [Application, 'a'],
       [User, 'u', "u.username == 'john'"]
     ], function(facts) {
-      console.log('Action fired - Limit: ', facts);
+      console.log('Action fired - Limit by app/user: ', facts);
       var key = facts.a.id + '-' + facts.u.id;
       var ctx = this.getFacts(Context)[0];
       ctx.proceed = rateLimiter.enforce(ctx, key);
       this.modify(ctx);
     });
 
+  this.rule("Limit requests based on remote ip",
+    [
+      [Context, 'c'],
+      [String, 'ip', "ip == '127.0.0.1'", "from c.req.ip"]
+    ], function(facts) {
+      console.log('Action fired - Limit by ip: ', facts);
+      var key = 'IP-' + facts.ip;
+      var ctx = this.getFacts(Context)[0];
+      ctx.proceed = rateLimiter.enforce(ctx, key);
+    });
 });
 
 function testFlow(ctx, next) {
@@ -59,8 +70,8 @@ function testFlow(ctx, next) {
   session.match().then(function() {
     console.log('Match is done');
     var ctx = session.getFacts(Context)[0];
-    if (ctx.limit) {
-      console.log(ctx.limit);
+    if (ctx.limits) {
+      console.log(ctx.limits);
     }
     if (ctx.proceed) {
       next();
@@ -97,7 +108,7 @@ app.use(function(req, res, next) {
 
 app.use(function(req, res, next) {
   console.log('API invoked: ', req.url);
-  res.send(req.ctx.limit ||
+  res.send(req.ctx.limits ||
   {msg: 'API invoked without rate limiting: ' + req.url});
 });
 
