@@ -6,70 +6,99 @@ var app = express();
 
 // First define object types for facts. There will be LoopBack models.
 
+function modelingFacts() {
+
 // Mock up the Context model
-var Context = function(req, res) {
-  this.req = req;
-  this.res = res;
-  this.limits = {};
-  this.proceed = true;
-};
+  var Context = function(req, res) {
+    this.req = req;
+    this.res = res;
+    this.limits = {};
+    this.proceed = true;
+  };
 
 // Mock up the Application model
-var Application = function(id, name) {
-  this.id = id;
-  this.name = name;
-};
+  var Application = function(id, name) {
+    this.id = id;
+    this.name = name;
+  };
 
 // Mock up the User model
-var User = function(id, username, email) {
-  this.id = id;
-  this.username = username;
-  this.email = email;
-};
+  var User = function(id, username, email) {
+    this.id = id;
+    this.username = username;
+    this.email = email;
+  };
+
+  return {
+    Context: Context,
+    Application: Application,
+    User: User
+  };
+}
+
+function Rule(name, patterns, action, options) {
+  this.name = name;
+  this.patterns = patterns;
+  this.options = options || {};
+  this.action = action;
+}
+
+// Define rules
+function defineFlow(name, rules, callback) {
+  var flow = nools.flow(name, function(f) {
+    for (var i = 0, n = rules.length; i < n; i++) {
+      var rule = rules[i];
+      this.rule(rule.name, rule.options, rule.patterns, rule.action);
+    }
+  });
+  return flow;
+}
 
 // A global counters
 var rateLimiter = new RateLimiter({interval: 1000, limit: 10});
 
-// Define rules
-var flow = nools.flow("Rate Limiting", function(f) {
-  this.rule("Limit requests based on application and user",
-    [
-      [Application, 'a'],
-      [User, 'u', "u.username == 'john'"]
-    ], function(facts) {
-      console.log('Action fired - Limit by app/user: ', facts);
-      var key = facts.a.id + '-' + facts.u.id;
-      var ctx = this.getFacts(Context)[0];
-      ctx.proceed = rateLimiter.enforce(ctx, key);
-      this.modify(ctx);
-    });
+var models = modelingFacts();
 
-  this.rule("Limit requests based on remote ip",
-    [
-      [Context, 'c'],
-      [String, 'ip', "ip == '127.0.0.1'", "from c.req.ip"]
-    ], function(facts) {
-      console.log('Action fired - Limit by ip: ', facts);
-      var key = 'IP-' + facts.ip;
-      var ctx = this.getFacts(Context)[0];
-      ctx.proceed = rateLimiter.enforce(ctx, key);
-    });
-});
+var ruleForAppAndUser = new Rule("Limit requests based on application and user",
+  [
+    [models.Application, 'a'],
+    [models.User, 'u', "u.username == 'john'"]
+  ],
+  function(facts) {
+    console.log('Action fired - Limit by app/user: ', facts);
+    var key = facts.a.id + '-' + facts.u.id;
+    var ctx = this.getFacts(models.Context)[0];
+    ctx.proceed = rateLimiter.enforce(ctx, key);
+    this.modify(ctx);
+  });
 
-function testFlow(ctx, next) {
+var ruleForIp = new Rule("Limit requests based on remote ip",
+  [
+    [models.Context, 'c'],
+    [String, 'ip', "ip == '127.0.0.1'", "from c.req.ip"]
+  ], function(facts) {
+    console.log('Action fired - Limit by ip: ', facts);
+    var key = 'IP-' + facts.ip;
+    var ctx = this.getFacts(models.Context)[0];
+    ctx.proceed = rateLimiter.enforce(ctx, key);
+  });
+
+var flow = defineFlow("Rate Limiting", [ruleForAppAndUser, ruleForIp]);
+
+function executeFlow(ctx, next) {
   // Create a session with initial facts
   var session = flow.getSession(ctx);
 
   // Add more facts
-  session.assert(new Application(ctx.application.id,
+  session.assert(new models.Application(ctx.application.id,
     ctx.application.name));
-  session.assert(new User(ctx.user.id, ctx.user.username,
+  session.assert(new models.User(ctx.user.id, ctx.user.username,
     ctx.user.email));
 
   // Match
   session.match().then(function() {
     console.log('Match is done');
-    var ctx = session.getFacts(Context)[0];
+    var ctx = session.getFacts(models.Context)[0];
     if (ctx.limits) {
       console.log(ctx.limits);
     }
@@ -88,7 +117,7 @@ function testFlow(ctx, next) {
 
 // Mock up the context setup
 app.use(function contextInit(req, res, next) {
-  req.ctx = new Context(req, res);
+  req.ctx = new models.Context(req, res);
   req.ctx.application = {
     id: 1,
     name: 'Test App'
@@ -103,7 +132,7 @@ app.use(function contextInit(req, res, next) {
 
 // Intercept the requests and enforce rules
 app.use(function(req, res, next) {
-  testFlow(req.ctx, next);
+  executeFlow(req.ctx, next);
 });
 
 app.use(function(req, res, next) {
