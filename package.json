@@ -1,15 +1,14 @@
 {
   "name": "loopback-policy",
   "version": "0.1.0",
-  "description": "",
-  "main": "server.js",
+  "description": "LoopBack policy framework",
+  "main": "lib/index.js",
   "dependencies": {
     "async": "^0.9.0",
-    "browserify": "^7.0.2",
     "debug": "^2.1.1",
-    "express": "^4.10.6",
+    "express": "^4.11.2",
     "extend": "^2.0.0",
-    "nools": "^0.3.0"
+    "nools": "git+ssh://git@github.com:strongloop/strong-rules.git"
   },
   "devDependencies": {
     "limiter": "^1.0.5"

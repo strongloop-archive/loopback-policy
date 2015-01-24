@@ -1,8 +1,11 @@
 "use strict";
 var express = require('express');
-var nools = require('nools');
-var RateLimiter = require('./token-bucket');
+var RateLimiter = require('./memory');
 var app = express();
+
+var pf = require('../../lib/index');
+var Policy = pf.Policy;
+var Rule = pf.Rule;
 
 // First define object types for facts. There will be LoopBack models.
 
@@ -13,7 +16,6 @@ function modelingFacts() {
     this.req = req;
     this.res = res;
     this.limits = {};
-    this.proceed = true;
   };
 
 // Mock up the Application model
@@ -36,80 +38,80 @@ function modelingFacts() {
   };
 }
 
-function Rule(name, patterns, action, options) {
-  this.name = name;
-  this.patterns = patterns;
-  this.options = options || {};
-  this.action = action;
-}
-
-// Define rules
-function defineFlow(name, rules, callback) {
-  var flow = nools.flow(name, function(f) {
-    for (var i = 0, n = rules.length; i < n; i++) {
-      var rule = rules[i];
-      this.rule(rule.name, rule.options, rule.patterns, rule.action);
-    }
-  });
-  return flow;
-}
-
 // A global counters
 var rateLimiter = new RateLimiter({interval: 1000, limit: 10});
 
 var models = modelingFacts();
 
+function getHandler(session, key) {
+  var ctx = session.getFacts(models.Context)[0];
+  return function(err, result) {
+    if (ctx.proceed === false) {
+      return;
+    }
+    var res = ctx.res;
+    ctx.limits = ctx.limits || {};
+    ctx.limits[key] = result;
+    res.setHeader('X-RateLimit-Limit', result.limit);
+    res.setHeader('X-RateLimit-Remaining', result.remaining);
+    res.setHeader('X-RateLimit-Reset', result.reset);
+    ctx.proceed = result.isAllowed;
+    if (!result.isAllowed) {
+      res.status(429).json({error: 'Limit exceeded'});
+      session.halt();
+    }
+  };
+}
+
 var ruleForAppAndUser = new Rule("Limit requests based on application and user",
   [
+    [models.Context, 'c', function(facts) {
+      var ctx = facts.c;
+      return ctx.proceed === undefined;
+    }],
     [models.Application, 'a'],
     [models.User, 'u', "u.username == 'john'"]
   ],
   function(facts) {
-    console.log('Action fired - Limit by app/user: ', facts);
-    var key = facts.a.id + '-' + facts.u.id;
-    var ctx = this.getFacts(models.Context)[0];
-    ctx.proceed = rateLimiter.enforce(ctx, key);
-    this.modify(ctx);
+    console.log('Action fired - Limit by app/user: ', facts.a, facts.u);
+    var key = 'App-' + facts.a.id + '-User-' + facts.u.id;
+    rateLimiter.enforce(key, getHandler(this, key));
   });
 
 var ruleForIp = new Rule("Limit requests based on remote ip",
   [
-    [models.Context, 'c'],
-    [String, 'ip', "ip == '127.0.0.1'", "from c.req.ip"]
+    [models.Context, 'c', function(facts) {
+      var ctx = facts.c;
+      return ctx.proceed === undefined;
+    }],
+    [String, 'ip', "ip == '127.0.0.1' || ip == '::1'", "from c.req.ip"],
   ], function(facts) {
-    console.log('Action fired - Limit by ip: ', facts);
+    console.log('Action fired - Limit by ip: ', facts.ip);
     var key = 'IP-' + facts.ip;
-    var ctx = this.getFacts(models.Context)[0];
-    ctx.proceed = rateLimiter.enforce(ctx, key);
+    rateLimiter.enforce(key, getHandler(this, key));
   });
 
-var flow = defineFlow("Rate Limiting", [ruleForAppAndUser, ruleForIp]);
+var policy = new Policy("Rate Limiting", [ruleForAppAndUser, ruleForIp]);
 
 function executeFlow(ctx, next) {
-  // Create a session with initial facts
-  var session = flow.getSession(ctx);
+  var facts = [
+    new models.Application(ctx.application.id, ctx.application.name),
+    new models.User(ctx.user.id, ctx.user.username, ctx.user.email)
+  ];
 
-  // Add more facts
-  session.assert(new models.Application(ctx.application.id,
-    ctx.application.name));
-  session.assert(new models.User(ctx.user.id, ctx.user.username,
-    ctx.user.email));
-
-  // Match
-  session.match().then(function() {
+  var session = policy.execute(ctx, facts, function(err) {
+    if (err) {
+      console.error(err);
+      return next(err);
+    }
     console.log('Match is done');
+    // session.print();
     var ctx = session.getFacts(models.Context)[0];
     if (ctx.limits) {
       console.log(ctx.limits);
     }
     if (ctx.proceed) {
       next();
-    }
-    session.dispose();
-  }, function(err) {
-    if (err) {
-      console.error(err);
-      next(err);
     }
   });
   return session;

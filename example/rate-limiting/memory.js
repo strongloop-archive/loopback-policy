@@ -15,44 +15,48 @@ function RateLimiter(options) {
   this.options = options;
 }
 
-RateLimiter.prototype.getLimiter = function(key) {
+RateLimiter.prototype.getLimiter = function(key, limit) {
   var inst;
   debug('Key: %s', key);
   if (key) {
     inst = this.limiters[key];
     if (!inst) {
-      debug('Creating rate limiter: %d %d', this.limit, this.interval);
-      inst = new limiter.RateLimiter(this.limit, this.interval);
+      debug('Creating rate limiter: %d %d', limit, this.interval);
+      inst = new limiter.RateLimiter(limit, this.interval);
       this.limiters[key] = inst;
     }
   }
   return inst;
 };
 
-RateLimiter.prototype.enforce = function(ctx, key) {
-  var res = ctx.res;
-  var inst = this.getLimiter(key);
+RateLimiter.prototype.enforce = function(key, options, cb) {
+  if (cb === undefined && typeof options === 'function') {
+    cb = options;
+    options = {};
+  }
+  options = options || {};
+  var weight = options.weight || 1;
+  var limit = options.limit || this.limit;
+  var inst = this.getLimiter(key, limit);
   if (inst) {
-    var ok = inst.tryRemoveTokens(1);
+    var ok = inst.tryRemoveTokens(weight);
     debug('Bucket: ', inst.tokenBucket);
     var remaining = Math.floor(inst.getTokensRemaining());
     var reset = Math.max(this.interval - (Date.now() - inst.curIntervalStart), 0);
 
-    debug('Limit: %d Remaining: %d Reset: %d', this.limit, remaining, reset);
-    res.setHeader('X-RateLimit-Limit', this.limit);
-    res.setHeader('X-RateLimit-Remaining', remaining);
-    res.setHeader('X-RateLimit-Reset', reset);
+    debug('Limit: %d Remaining: %d Reset: %d', limit, remaining, reset);
 
-    ctx.limits[key] = {
-      limit: this.limit,
+    var result = {
+      limit: limit,
       remaining: remaining,
-      reset: reset
+      reset: reset,
+      isAllowed: ok
     };
 
-    if (!ok) {
-      res.status(429).json({error: 'Limit exceeded'});
-      return false;
-    }
+    process.nextTick(function() {
+      if (cb) {
+        cb(null, result);
+      }
+    });
   }
-  return true;
 };
