@@ -1,0 +1,2 @@
+describe('Rule', function() {
+});
