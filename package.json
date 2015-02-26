@@ -8,13 +8,13 @@
     "debug": "^2.1.1",
     "express": "^4.11.2",
     "extend": "^2.0.0",
-    "nools": "git+ssh://git@github.com:strongloop/strong-rules.git"
+    "nools": "^0.4.0"
   },
   "devDependencies": {
     "limiter": "^1.0.5"
   },
   "scripts": {
-    "test": "mocha"
+    "test": "mocha -R spec"
   },
   "repository": {
     "type": "git",
