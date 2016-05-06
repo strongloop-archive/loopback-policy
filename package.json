@@ -24,5 +24,6 @@
   "bugs": {
     "url": "https://github.com/strongloop/loopback-policy/issues"
   },
-  "homepage": "https://github.com/strongloop/loopback-policy"
+  "homepage": "https://github.com/strongloop/loopback-policy",
+  "license": "MIT"
 }
