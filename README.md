@@ -1,3 +1,7 @@
+DEPRECATED
+
+---
+
 # LoopBack Policy
 
 ## Overview
